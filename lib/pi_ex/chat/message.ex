@@ -30,7 +30,7 @@ defmodule PiEx.Chat.Message do
 
   actions do
     default_accept :*
-    defaults [:read]
+    defaults [:read, :create]
 
     create :create_user do
       accept [:content]
