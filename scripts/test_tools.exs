@@ -52,17 +52,17 @@ PiEx.Agent.prompt(pid, prompt)
 defmodule Collector do
   def wait do
     receive do
-      {:pi_ex, _sid, %{type: :message_delta, delta: d}} -> IO.write(d); wait()
-      {:pi_ex, _sid, %{type: :tool_end, message: m}} ->
+      {:pi_ex_native, _sid, %{type: :message_delta, delta: d}} -> IO.write(d); wait()
+      {:pi_ex_native, _sid, %{type: :tool_end, message: m}} ->
         s = if m.is_error, do: "❌", else: "✅"
         IO.puts("\n  #{s} #{m.tool_name}: #{String.slice(m.content || "", 0..120)}")
         wait()
-      {:pi_ex, _sid, %{type: :message_end, message: m}} when m.role == :assistant ->
+      {:pi_ex_native, _sid, %{type: :message_end, message: m}} when m.role == :assistant ->
         for tc <- (m.tool_calls || []), do: IO.puts("\n  → #{tc.name}(#{inspect(tc.arguments)})")
         wait()
-      {:pi_ex, _sid, %{type: :agent_end}} -> :ok
-      {:pi_ex, _sid, %{type: :error, reason: r}} -> IO.puts("\n  ❌ ERROR: #{inspect(r)}"); wait()
-      {:pi_ex, _sid, _} -> wait()
+      {:pi_ex_native, _sid, %{type: :agent_end}} -> :ok
+      {:pi_ex_native, _sid, %{type: :error, reason: r}} -> IO.puts("\n  ❌ ERROR: #{inspect(r)}"); wait()
+      {:pi_ex_native, _sid, _} -> wait()
     after
       120_000 -> IO.puts("\n  ⏱️ Timeout")
     end

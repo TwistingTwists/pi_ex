@@ -8,7 +8,7 @@ defmodule PiEx.LLM do
   @doc """
   Build a stream_fn compatible with PiEx.Agent.
 
-  Streams token deltas to subscribers as `{:pi_ex, session_id, %{type: :message_delta, delta: text}}`.
+  Streams token deltas to subscribers as `{:pi_ex_native, session_id, %{type: :message_delta, delta: text}}`.
 
   Options:
     - `:model` — model spec string (default: #{@default_model})

@@ -14,12 +14,12 @@ extension pipeline, interrupt API, and session persistence.
 
 ## Installation
 
-Add `pi_ex` to your dependencies in `mix.exs`:
+Add `pi_ex_native` to your dependencies in `mix.exs`:
 
 ```elixir
 def deps do
   [
-    {:pi_ex, "~> 0.1.0"}
+    {:pi_ex_native, "~> 0.1.0"}
   ]
 end
 ```

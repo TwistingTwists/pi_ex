@@ -37,7 +37,7 @@ defmodule PiEx.Session.AgentJSONLTest do
     PiEx.Agent.subscribe(pid)
     PiEx.Agent.prompt(pid, "run echo hello")
 
-    assert_receive {:pi_ex, _session_id, %{type: :agent_end}}, 5000
+    assert_receive {:pi_ex_native, _session_id, %{type: :agent_end}}, 5000
 
     state = PiEx.Agent.get_state(pid)
     assert length(state.messages) >= 3

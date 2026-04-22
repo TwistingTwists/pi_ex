@@ -70,15 +70,15 @@ defmodule Runner do
 
   def collect_events(pid) do
     receive do
-      {:pi_ex, _sid, %{type: :agent_start}} ->
+      {:pi_ex_native, _sid, %{type: :agent_start}} ->
         IO.write("\n🤖 ")
         collect_events(pid)
 
-      {:pi_ex, _sid, %{type: :message_delta, delta: delta}} ->
+      {:pi_ex_native, _sid, %{type: :message_delta, delta: delta}} ->
         IO.write(delta)
         collect_events(pid)
 
-      {:pi_ex, _sid, %{type: :message_end, message: msg}} when msg.role == :assistant ->
+      {:pi_ex_native, _sid, %{type: :message_end, message: msg}} when msg.role == :assistant ->
         IO.puts("")
 
         if msg.tool_calls != [] do
@@ -89,7 +89,7 @@ defmodule Runner do
 
         collect_events(pid)
 
-      {:pi_ex, _sid, %{type: :tool_end, message: msg}} ->
+      {:pi_ex_native, _sid, %{type: :tool_end, message: msg}} ->
         status = if msg.is_error, do: "❌", else: "✅"
         # Truncate long tool output for display
         content = msg.content || ""
@@ -97,19 +97,19 @@ defmodule Runner do
         IO.puts("  #{status} #{msg.tool_name}: #{display}")
         collect_events(pid)
 
-      {:pi_ex, _sid, %{type: :turn_start}} ->
+      {:pi_ex_native, _sid, %{type: :turn_start}} ->
         collect_events(pid)
 
-      {:pi_ex, _sid, %{type: :turn_end}} ->
+      {:pi_ex_native, _sid, %{type: :turn_end}} ->
         collect_events(pid)
 
-      {:pi_ex, _sid, %{type: :agent_end, messages: msgs}} ->
+      {:pi_ex_native, _sid, %{type: :agent_end, messages: msgs}} ->
         user_count = Enum.count(msgs, &(&1.role == :user))
         asst_count = Enum.count(msgs, &(&1.role == :assistant))
         tool_count = Enum.count(msgs, &(&1.role == :tool_result))
         IO.puts("  📊 #{user_count} user, #{asst_count} assistant, #{tool_count} tool messages")
 
-      {:pi_ex, _sid, %{type: :error, reason: reason}} ->
+      {:pi_ex_native, _sid, %{type: :error, reason: reason}} ->
         IO.puts("  ❌ Error: #{inspect(reason)}")
         collect_events(pid)
 

@@ -39,7 +39,7 @@ defmodule PiEx do
           {:ok, %{agent: pid, events: []}}
         end
 
-        def handle_info({:pi_ex, _session_id, event}, state) do
+        def handle_info({:pi_ex_native, _session_id, event}, state) do
           # process or broadcast events
           {:noreply, %{state | events: [event | state.events]}}
         end

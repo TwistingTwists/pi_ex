@@ -189,7 +189,7 @@ defmodule PiEx.HooksTest do
 
       assert_receive {:before, "bash"}, 5000
       assert_receive {:after, "bash"}, 5000
-      assert_receive {:pi_ex, _, %{type: :agent_end}}, 5000
+      assert_receive {:pi_ex_native, _, %{type: :agent_end}}, 5000
     end
 
     test "before_tool_call can block in agent" do
@@ -231,10 +231,10 @@ defmodule PiEx.HooksTest do
       PiEx.Agent.subscribe(pid)
       PiEx.Agent.prompt(pid, "delete everything")
 
-      assert_receive {:pi_ex, _, %{type: :tool_end, message: msg}}, 5000
+      assert_receive {:pi_ex_native, _, %{type: :tool_end, message: msg}}, 5000
       assert msg.is_error == true
       assert msg.content =~ "Dangerous!"
-      assert_receive {:pi_ex, _, %{type: :agent_end}}, 5000
+      assert_receive {:pi_ex_native, _, %{type: :agent_end}}, 5000
     end
   end
 end

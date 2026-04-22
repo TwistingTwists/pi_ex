@@ -54,8 +54,8 @@ defmodule PiEx.AgentTest do
     PiEx.Agent.subscribe(pid)
     PiEx.Agent.prompt(pid, "Hi")
 
-    assert_receive {:pi_ex, _session_id, %{type: :agent_start}}, 5000
-    assert_receive {:pi_ex, _session_id, %{type: :agent_end, messages: messages}}, 5000
+    assert_receive {:pi_ex_native, _session_id, %{type: :agent_start}}, 5000
+    assert_receive {:pi_ex_native, _session_id, %{type: :agent_end, messages: messages}}, 5000
 
     assert length(messages) == 2
   end
@@ -79,8 +79,8 @@ defmodule PiEx.AgentTest do
     PiEx.Agent.subscribe(pid)
     PiEx.Agent.prompt(pid, "Read test.txt")
 
-    assert_receive {:pi_ex, _sid, %{type: :agent_start}}, 5000
-    assert_receive {:pi_ex, _sid, %{type: :agent_end, messages: msgs}}, 5000
+    assert_receive {:pi_ex_native, _sid, %{type: :agent_start}}, 5000
+    assert_receive {:pi_ex_native, _sid, %{type: :agent_end, messages: msgs}}, 5000
 
     # user + assistant(tool_call) + tool_result + assistant(final)
     assert length(msgs) >= 4
@@ -127,7 +127,7 @@ defmodule PiEx.AgentTest do
     Process.sleep(50)
     PiEx.Agent.steer(pid, "STEER: change direction")
 
-    assert_receive {:pi_ex, _sid, %{type: :agent_end}}, 5000
+    assert_receive {:pi_ex_native, _sid, %{type: :agent_end}}, 5000
   end
 
   test "abort kills current operation" do
@@ -142,7 +142,7 @@ defmodule PiEx.AgentTest do
     Process.sleep(50)
     PiEx.Agent.abort(pid)
 
-    assert_receive {:pi_ex, _sid, %{type: :agent_end}}, 5000
+    assert_receive {:pi_ex_native, _sid, %{type: :agent_end}}, 5000
 
     state = PiEx.Agent.get_state(pid)
     assert state.status == :idle

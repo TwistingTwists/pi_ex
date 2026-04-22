@@ -10,7 +10,7 @@ defmodule PiEx.Application do
     children = [
       {Registry, keys: :duplicate, name: PiEx.EventRegistry},
       {Task.Supervisor, name: PiEx.TaskSupervisor},
-      {DynamicSupervisor, name: :pi_ex_sessions, strategy: :one_for_one}
+      {DynamicSupervisor, name: :pi_ex_native_sessions, strategy: :one_for_one}
     ]
 
     # See https://hexdocs.pm/elixir/Supervisor.html

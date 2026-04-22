@@ -29,16 +29,16 @@ PiEx.Agent.prompt(pid, prompt)
 defmodule Oneshot do
   def wait_for_done do
     receive do
-      {:pi_ex, _sid, %{type: :message_delta, delta: delta}} ->
+      {:pi_ex_native, _sid, %{type: :message_delta, delta: delta}} ->
         IO.write(delta)
         wait_for_done()
 
-      {:pi_ex, _sid, %{type: :tool_end, message: msg}} ->
+      {:pi_ex_native, _sid, %{type: :tool_end, message: msg}} ->
         status = if msg.is_error, do: "ERROR", else: "OK"
         IO.puts("\n  [#{status}] #{msg.tool_name}: #{String.slice(msg.content || "", 0..120)}")
         wait_for_done()
 
-      {:pi_ex, _sid, %{type: :message_end, message: msg}} when msg.role == :assistant ->
+      {:pi_ex_native, _sid, %{type: :message_end, message: msg}} when msg.role == :assistant ->
         if msg.tool_calls != [] do
           for tc <- msg.tool_calls do
             IO.puts("\n  → #{tc.name}(#{inspect(tc.arguments)})")
@@ -46,15 +46,15 @@ defmodule Oneshot do
         end
         wait_for_done()
 
-      {:pi_ex, _sid, %{type: :agent_end}} ->
+      {:pi_ex_native, _sid, %{type: :agent_end}} ->
         IO.puts("")
         :done
 
-      {:pi_ex, _sid, %{type: :error, reason: reason}} ->
+      {:pi_ex_native, _sid, %{type: :error, reason: reason}} ->
         IO.puts("\nERROR: #{inspect(reason)}")
         wait_for_done()
 
-      {:pi_ex, _sid, _event} ->
+      {:pi_ex_native, _sid, _event} ->
         wait_for_done()
 
     after

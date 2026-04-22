@@ -194,7 +194,7 @@ defmodule PiEx.ExtensionTest do
       assert_receive {:ext_event, :before_prompt, %{text: "hello"}}, 5000
       assert_receive {:ext_event, :turn_start, _}, 5000
       assert_receive {:ext_event, :agent_end, _}, 5000
-      assert_receive {:pi_ex, _, %{type: :agent_end}}, 5000
+      assert_receive {:pi_ex_native, _, %{type: :agent_end}}, 5000
     end
 
     test "extension can mutate prompt text" do
@@ -223,7 +223,7 @@ defmodule PiEx.ExtensionTest do
       PiEx.Agent.subscribe(pid)
       PiEx.Agent.prompt(pid, "original text")
 
-      assert_receive {:pi_ex, _, %{type: :agent_end}}, 5000
+      assert_receive {:pi_ex_native, _, %{type: :agent_end}}, 5000
       [{:last_user_msg, content}] = :ets.lookup(captured_msgs, :last_user_msg)
       assert content == "mutated prompt"
       :ets.delete(captured_msgs)

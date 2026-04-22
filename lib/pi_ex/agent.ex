@@ -25,7 +25,7 @@ defmodule PiEx.Agent do
 
   @spec start_session(session_opts()) :: {:ok, pid()} | {:error, term()}
   def start_session(opts \\ []) do
-    DynamicSupervisor.start_child(:pi_ex_sessions, {__MODULE__, opts})
+    DynamicSupervisor.start_child(:pi_ex_native_sessions, {__MODULE__, opts})
   end
 
   def start_link(opts) do

@@ -30,7 +30,7 @@ defmodule PiEx.Events do
       {:DOWN, ^ref, :process, ^target, _} ->
         :ok
 
-      {:pi_ex, ^session_id, _event} = msg ->
+      {:pi_ex_native, ^session_id, _event} = msg ->
         send(target, msg)
         relay_loop(ref, target, session_id)
     end
@@ -39,7 +39,7 @@ defmodule PiEx.Events do
   @doc "Broadcast an event to all subscribers of the given session_id."
   @spec broadcast(String.t(), map()) :: :ok
   def broadcast(session_id, event) do
-    msg = {:pi_ex, session_id, event}
+    msg = {:pi_ex_native, session_id, event}
 
     Registry.dispatch(@registry, session_id, fn entries ->
       for {pid, value} <- entries do

@@ -97,9 +97,9 @@ defmodule PiEx.InterruptTest do
     PiEx.Agent.subscribe(pid)
     PiEx.Agent.interrupt(pid, "Hello", mode: :graceful)
 
-    assert_receive {:pi_ex, _, %{type: :interrupted, mode: :graceful, text: "Hello"}}, 5000
-    assert_receive {:pi_ex, _, %{type: :agent_start}}, 5000
-    assert_receive {:pi_ex, _, %{type: :agent_end, messages: msgs}}, 5000
+    assert_receive {:pi_ex_native, _, %{type: :interrupted, mode: :graceful, text: "Hello"}}, 5000
+    assert_receive {:pi_ex_native, _, %{type: :agent_start}}, 5000
+    assert_receive {:pi_ex_native, _, %{type: :agent_end, messages: msgs}}, 5000
     assert length(msgs) == 2
   end
 
@@ -113,13 +113,13 @@ defmodule PiEx.InterruptTest do
 
     # Now streaming — interrupt gracefully
     PiEx.Agent.interrupt(pid, "INTERRUPT: change course", mode: :graceful)
-    assert_receive {:pi_ex, _, %{type: :interrupted, mode: :graceful}}, 5000
+    assert_receive {:pi_ex_native, _, %{type: :interrupted, mode: :graceful}}, 5000
 
     # Let the stream finish
     open_gate(gate)
 
     # Should see the interrupt text picked up in next turn
-    assert_receive {:pi_ex, _, %{type: :agent_end}}, 5000
+    assert_receive {:pi_ex_native, _, %{type: :agent_end}}, 5000
 
     state = PiEx.Agent.get_state(pid)
     assert Enum.any?(state.messages, fn m -> m.role == :user and m.content =~ "INTERRUPT" end)
@@ -159,12 +159,12 @@ defmodule PiEx.InterruptTest do
     # Interrupt immediately — should kill first task
     PiEx.Agent.interrupt(pid, "STOP NOW", mode: :immediate)
 
-    assert_receive {:pi_ex, _, %{type: :interrupted, mode: :immediate, text: "STOP NOW"}}, 5000
+    assert_receive {:pi_ex_native, _, %{type: :interrupted, mode: :immediate, text: "STOP NOW"}}, 5000
     assert_receive {:stream_started, 1}, 5000
 
     # Let second call finish
     open_gate(gate2)
-    assert_receive {:pi_ex, _, %{type: :agent_end}}, 5000
+    assert_receive {:pi_ex_native, _, %{type: :agent_end}}, 5000
 
     state = PiEx.Agent.get_state(pid)
     assert Enum.any?(state.messages, fn m -> m.role == :user and m.content =~ "STOP NOW" end)
@@ -189,8 +189,8 @@ defmodule PiEx.InterruptTest do
     PiEx.Agent.subscribe(pid)
     PiEx.Agent.interrupt(pid, "Go", mode: :immediate)
 
-    assert_receive {:pi_ex, _, %{type: :interrupted, mode: :immediate}}, 5000
-    assert_receive {:pi_ex, _, %{type: :agent_end}}, 5000
+    assert_receive {:pi_ex_native, _, %{type: :interrupted, mode: :immediate}}, 5000
+    assert_receive {:pi_ex_native, _, %{type: :agent_end}}, 5000
   end
 
   test "after_turn while streaming skips tools and injects message" do
@@ -208,7 +208,7 @@ defmodule PiEx.InterruptTest do
     open_gate(gate)
 
     # Should see interrupted event
-    assert_receive {:pi_ex, _,
+    assert_receive {:pi_ex_native, _,
                     %{type: :interrupted, mode: :after_turn, text: "INTERRUPT: redirect"}},
                    5000
 
@@ -216,7 +216,7 @@ defmodule PiEx.InterruptTest do
     assert_receive {:stream_call, 1}, 5000
 
     # Agent ends
-    assert_receive {:pi_ex, _, %{type: :agent_end}}, 5000
+    assert_receive {:pi_ex_native, _, %{type: :agent_end}}, 5000
 
     state = PiEx.Agent.get_state(pid)
     # Should NOT have tool role messages (tools were skipped)
