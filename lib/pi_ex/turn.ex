@@ -59,26 +59,58 @@ defmodule PiEx.Turn do
   @doc """
   Execute tool calls in parallel and return tool result messages.
   """
-  def execute_tools(tool_calls, tool_map, context) do
+  def execute_tools(tool_calls, tool_map, context, hooks \\ %{}) do
     tool_calls
     |> Task.async_stream(
-      fn tc -> execute_single_tool(tc, tool_map, context) end,
+      fn tc -> execute_single_tool(tc, tool_map, context, hooks) end,
       max_concurrency: 4,
       ordered: true
     )
     |> Enum.map(fn {:ok, result} -> result end)
   end
 
-  defp execute_single_tool(tool_call, tool_map, context) do
+  defp execute_single_tool(tool_call, tool_map, context, hooks) do
+    # Phase 1 — Prepare
     case Map.fetch(tool_map, tool_call.name) do
       {:ok, tool_mod} ->
-        case tool_mod.execute(tool_call.arguments, context) do
-          {:ok, parts} ->
-            text = Enum.map_join(parts, "\n", fn %{text: t} -> t end)
-            create_tool_result(tool_call, text, false)
+        before_result =
+          case Map.get(hooks, :before_tool_call) do
+            nil -> :ok
+            hook -> hook.(tool_call, tool_call.arguments, context)
+          end
 
-          {:error, reason} ->
+        case before_result do
+          {:block, reason} ->
             create_tool_result(tool_call, to_string(reason), true)
+
+          :ok ->
+            # Phase 2 — Execute
+            {content, is_error} =
+              case tool_mod.execute(tool_call.arguments, context) do
+                {:ok, parts} ->
+                  {Enum.map_join(parts, "\n", fn %{text: t} -> t end), false}
+
+                {:error, reason} ->
+                  {to_string(reason), true}
+              end
+
+            # Phase 3 — Finalize
+            {content, is_error} =
+              case Map.get(hooks, :after_tool_call) do
+                nil ->
+                  {content, is_error}
+
+                hook ->
+                  case hook.(tool_call, tool_call.arguments, content, is_error, context) do
+                    :ok ->
+                      {content, is_error}
+
+                    {:override, %{content: new_content, is_error: new_is_error}} ->
+                      {new_content, new_is_error}
+                  end
+              end
+
+            create_tool_result(tool_call, content, is_error)
         end
 
       :error ->

@@ -17,7 +17,9 @@ defmodule PiEx.Agent do
     :messages,
     :subscribers,
     :steering_queue,
-    :task_ref
+    :task_ref,
+    :hooks,
+    :on_event
   ]
 
   # --- Public API ---
@@ -60,7 +62,9 @@ defmodule PiEx.Agent do
       messages: [],
       subscribers: MapSet.new(),
       steering_queue: [],
-      task_ref: nil
+      task_ref: nil,
+      hooks: Keyword.get(opts, :hooks, %{}),
+      on_event: Keyword.get(opts, :on_event)
     }
 
     {:ok, state}
@@ -124,8 +128,19 @@ defmodule PiEx.Agent do
 
     if tool_calls != [] do
       state = %{state | status: :executing_tools}
+
+      state =
+        Enum.reduce(tool_calls, state, fn tc, acc ->
+          broadcast(acc, %{
+            type: :tool_start,
+            tool_name: tc.name,
+            args: tc.arguments,
+            tool_call_id: tc.id
+          })
+        end)
+
       context = %{cwd: state.cwd}
-      tool_results = Turn.execute_tools(tool_calls, state.tool_map, context)
+      tool_results = Turn.execute_tools(tool_calls, state.tool_map, context, state.hooks)
 
       state =
         Enum.reduce(tool_results, state, fn result, acc ->
@@ -227,6 +242,8 @@ defmodule PiEx.Agent do
   end
 
   defp broadcast(state, event) do
+    if state.on_event, do: state.on_event.(event)
+
     for pid <- state.subscribers do
       send(pid, {:pi_ex, state.session_id, event})
     end
