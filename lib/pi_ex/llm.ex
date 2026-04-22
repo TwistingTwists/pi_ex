@@ -94,10 +94,13 @@ defmodule PiEx.LLM do
             |> Enum.reverse()
             |> Enum.map(fn tc ->
               raw_args = Map.get(result.arg_buffers, tc.index, "{}")
-              args = case Jason.decode(raw_args) do
-                {:ok, map} -> map
-                _ -> %{"raw" => raw_args}
-              end
+
+              args =
+                case Jason.decode(raw_args) do
+                  {:ok, map} -> map
+                  _ -> %{"raw" => raw_args}
+                end
+
               %{id: tc.id, name: tc.name, arguments: args}
             end)
 

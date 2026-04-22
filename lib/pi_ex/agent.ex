@@ -46,7 +46,13 @@ defmodule PiEx.Agent do
       session_id: Keyword.get(opts, :session_id, generate_id()),
       status: :idle,
       stream_fn: Keyword.fetch!(opts, :stream_fn),
-      system_prompt: Keyword.get(opts, :system_prompt, "You are a helpful coding assistant."),
+      system_prompt:
+        Keyword.get_lazy(opts, :system_prompt, fn ->
+          PiEx.SystemPrompt.build(
+            tools: tools,
+            cwd: Keyword.get(opts, :cwd, File.cwd!())
+          )
+        end),
       tools: tools,
       tool_map: Turn.build_tool_map(tools),
       cwd: Keyword.get(opts, :cwd, File.cwd!()),
@@ -172,7 +178,14 @@ defmodule PiEx.Agent do
     messages = state.messages
     system_prompt = state.system_prompt
     tools = state.tools
-    opts = [model: state.model, cwd: state.cwd, caller: self(), subscribers: state.subscribers, session_id: state.session_id]
+
+    opts = [
+      model: state.model,
+      cwd: state.cwd,
+      caller: self(),
+      subscribers: state.subscribers,
+      session_id: state.session_id
+    ]
 
     task =
       Task.async(fn ->
