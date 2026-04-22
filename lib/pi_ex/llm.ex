@@ -8,8 +8,7 @@ defmodule PiEx.LLM do
   @doc """
   Build a stream_fn compatible with PiEx.Agent.
 
-  The returned function streams token deltas to the calling process as
-  `{:llm_delta, text}` messages, then returns the full assistant message.
+  Streams token deltas to subscribers as `{:pi_ex, session_id, %{type: :message_delta, delta: text}}`.
 
   Options:
     - `:model` — model spec string (default: #{@default_model})
@@ -49,33 +48,66 @@ defmodule PiEx.LLM do
 
       case ReqLLM.stream_text(call_model, llm_messages, req_opts) do
         {:ok, stream_response} ->
-          # Stream tokens to caller, collect full text
-          full_text =
-            stream_response
-            |> ReqLLM.StreamResponse.tokens()
-            |> Enum.map_join("", fn token ->
-              for pid <- subscribers do
-                send(pid, {:pi_ex, session_id, %{type: :message_delta, delta: token}})
-              end
+          # Consume the raw stream, collecting text and tool calls.
+          # Tool call arguments arrive as :meta chunks with :tool_call_args fragments.
+          init = %{texts: [], tool_calls: [], arg_buffers: %{}, meta: %{}}
 
-              token
+          result =
+            Enum.reduce(stream_response.stream, init, fn chunk, acc ->
+              case chunk.type do
+                :content when is_binary(chunk.text) and chunk.text != "" ->
+                  for pid <- subscribers do
+                    send(pid, {:pi_ex, session_id, %{type: :message_delta, delta: chunk.text}})
+                  end
+
+                  %{acc | texts: [chunk.text | acc.texts]}
+
+                :tool_call ->
+                  id = chunk.metadata[:id] || chunk.metadata["id"]
+                  index = chunk.metadata[:index] || chunk.metadata["index"]
+                  tc = %{name: chunk.name, id: id, index: index}
+                  %{acc | tool_calls: [tc | acc.tool_calls]}
+
+                :meta ->
+                  acc = %{acc | meta: Map.merge(acc.meta, chunk.metadata)}
+
+                  # Accumulate tool_call_args fragments
+                  case chunk.metadata do
+                    %{tool_call_args: %{index: idx, fragment: frag}} ->
+                      buf = Map.get(acc.arg_buffers, idx, "")
+                      %{acc | arg_buffers: Map.put(acc.arg_buffers, idx, buf <> frag)}
+
+                    _ ->
+                      acc
+                  end
+
+                _ ->
+                  acc
+              end
             end)
 
-          # Get metadata after stream is consumed
+          full_text = result.texts |> Enum.reverse() |> Enum.join("")
+
+          # Merge accumulated argument JSON into tool calls
+          tool_calls =
+            result.tool_calls
+            |> Enum.reverse()
+            |> Enum.map(fn tc ->
+              raw_args = Map.get(result.arg_buffers, tc.index, "{}")
+              args = case Jason.decode(raw_args) do
+                {:ok, map} -> map
+                _ -> %{"raw" => raw_args}
+              end
+              %{id: tc.id, name: tc.name, arguments: args}
+            end)
+
+          # Get usage from metadata handle
           usage = ReqLLM.StreamResponse.usage(stream_response)
 
-          # Convert to full response for tool call extraction
-          case ReqLLM.StreamResponse.to_response(stream_response) do
-            {:ok, response} ->
-              classified = ReqLLM.Response.classify(response)
-              assistant_msg = build_assistant_message(full_text, classified, response, usage)
-              {:ok, assistant_msg}
+          assistant_msg =
+            build_assistant_message(full_text, tool_calls, result.meta, call_model, usage)
 
-            {:error, _} ->
-              # Fallback: build message from streamed text (no tool calls)
-              assistant_msg = build_simple_message(full_text, call_model, usage)
-              {:ok, assistant_msg}
-          end
+          {:ok, assistant_msg}
 
         {:error, reason} ->
           {:error, inspect(reason)}
@@ -83,40 +115,31 @@ defmodule PiEx.LLM do
     end
   end
 
-  defp build_assistant_message(full_text, classified, response, usage) do
-    tool_calls =
-      Enum.map(classified.tool_calls, fn tc ->
+  defp build_assistant_message(text, tool_calls, meta, model, usage) do
+    pi_tool_calls =
+      Enum.map(tool_calls, fn tc ->
         %PiEx.Chat.ToolCall{
-          id: tc.id,
+          id: tc.id || "tc_#{System.unique_integer([:positive])}",
           name: tc.name,
           arguments: parse_arguments(tc.arguments)
         }
       end)
 
+    finish_reason = meta[:finish_reason] || meta["finish_reason"]
+
     stop_reason =
-      case classified.type do
-        :tool_calls -> :tool_use
-        :final_answer -> :end_turn
+      cond do
+        pi_tool_calls != [] -> :tool_use
+        finish_reason in ["tool_use", :tool_use, "tool_calls", :tool_calls] -> :tool_use
+        true -> :end_turn
       end
 
     attrs = %{
-      content: full_text,
-      tool_calls: tool_calls,
-      model: response.model,
-      provider: "anthropic",
-      stop_reason: stop_reason,
-      usage: usage
-    }
-
-    Ash.Changeset.for_create(Message, :create_assistant, attrs) |> Ash.create!()
-  end
-
-  defp build_simple_message(text, model, usage) do
-    attrs = %{
       content: text,
+      tool_calls: pi_tool_calls,
       model: to_string(model),
       provider: "anthropic",
-      stop_reason: :end_turn,
+      stop_reason: stop_reason,
       usage: usage
     }
 
