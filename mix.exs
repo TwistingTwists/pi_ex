@@ -5,15 +5,15 @@ defmodule PiEx.MixProject do
     [
       app: :pi_ex,
       version: "0.1.0",
-      elixir: "~> 1.19",
+      elixir: "~> 1.18",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
       description:
         "An Elixir library for building AI coding agents, OTP-native with tool system, extensions, and session persistence.",
       package: package(),
       docs: docs(),
-      source_url: "https://github.com/pi-agents/pi_ex",
-      homepage_url: "https://github.com/pi-agents/pi_ex"
+      source_url: "https://github.com/TwistingTwists/pi_ex",
+      homepage_url: "https://github.com/TwistingTwists/pi_ex"
     ]
   end
 
@@ -39,7 +39,7 @@ defmodule PiEx.MixProject do
     [
       name: "pi_ex",
       licenses: ["MIT"],
-      links: %{"GitHub" => "https://github.com/pi-agents/pi_ex"},
+      links: %{"GitHub" => "https://github.com/TwistingTwists/pi_ex"},
       files: ~w(lib .formatter.exs mix.exs README.md LICENSE)
     ]
   end
