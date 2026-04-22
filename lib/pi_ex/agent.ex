@@ -43,6 +43,12 @@ defmodule PiEx.Agent do
   @spec abort(pid()) :: :ok
   def abort(pid), do: GenServer.cast(pid, :abort)
 
+  @spec interrupt(pid(), String.t(), keyword()) :: :ok
+  def interrupt(pid, text, opts \\ []) do
+    mode = Keyword.get(opts, :mode, :graceful)
+    GenServer.cast(pid, {:interrupt, text, mode})
+  end
+
   @spec get_state(pid()) :: %{status: atom(), messages: list(), model: String.t() | nil}
   def get_state(pid), do: GenServer.call(pid, :get_state)
 
@@ -95,7 +101,8 @@ defmodule PiEx.Agent do
       task_ref: nil,
       hooks: hooks,
       ext_entries: ext_entries,
-      on_event: Keyword.get(opts, :on_event)
+      on_event: Keyword.get(opts, :on_event),
+      pending_interrupt: nil
     }
 
     state = fire_extension_event(state, :session_start, %{})
@@ -162,6 +169,95 @@ defmodule PiEx.Agent do
 
   def handle_cast(:abort, state), do: {:noreply, state}
 
+  def handle_cast({:interrupt, text, :graceful}, %{session: %{status: :idle}} = state) do
+    # Idle — behave like prompt/2
+    user_msg =
+      Message
+      |> Ash.Changeset.for_create(:create_user, %{content: text})
+      |> Ash.create!()
+
+    state
+    |> append_message(user_msg)
+    |> set_status(:streaming)
+    |> broadcast(%{type: :interrupted, mode: :graceful, text: text})
+    |> broadcast(%{type: :agent_start})
+    |> broadcast(%{type: :turn_start})
+    |> spawn_llm_call()
+    |> then(&{:noreply, &1})
+  end
+
+  def handle_cast({:interrupt, text, :graceful}, state) do
+    # Streaming — queue like steer
+    session = %{state.session | steering_queue: state.session.steering_queue ++ [text]}
+    state = %{state | session: session}
+    broadcast(state, %{type: :interrupted, mode: :graceful, text: text})
+    {:noreply, state}
+  end
+
+  def handle_cast({:interrupt, text, :immediate}, %{session: %{status: :idle}} = state) do
+    user_msg =
+      Message
+      |> Ash.Changeset.for_create(:create_user, %{content: text})
+      |> Ash.create!()
+
+    state
+    |> append_message(user_msg)
+    |> set_status(:streaming)
+    |> broadcast(%{type: :interrupted, mode: :immediate, text: text})
+    |> broadcast(%{type: :agent_start})
+    |> broadcast(%{type: :turn_start})
+    |> spawn_llm_call()
+    |> then(&{:noreply, &1})
+  end
+
+  def handle_cast({:interrupt, text, :immediate}, %{task_ref: ref} = state) when ref != nil do
+    Process.demonitor(ref, [:flush])
+
+    user_msg =
+      Message
+      |> Ash.Changeset.for_create(:create_user, %{content: text})
+      |> Ash.create!()
+
+    state
+    |> Map.put(:task_ref, nil)
+    |> append_message(user_msg)
+    |> set_status(:streaming)
+    |> broadcast(%{type: :interrupted, mode: :immediate, text: text})
+    |> broadcast(%{type: :turn_start})
+    |> spawn_llm_call()
+    |> then(&{:noreply, &1})
+  end
+
+  def handle_cast({:interrupt, text, :immediate}, state) do
+    # No task ref but not idle (e.g. executing_tools) — queue as graceful
+    session = %{state.session | steering_queue: state.session.steering_queue ++ [text]}
+    state = %{state | session: session}
+    broadcast(state, %{type: :interrupted, mode: :immediate, text: text})
+    {:noreply, state}
+  end
+
+  def handle_cast({:interrupt, text, :after_turn}, %{session: %{status: :idle}} = state) do
+    # Idle — just start like prompt
+    user_msg =
+      Message
+      |> Ash.Changeset.for_create(:create_user, %{content: text})
+      |> Ash.create!()
+
+    state
+    |> append_message(user_msg)
+    |> set_status(:streaming)
+    |> broadcast(%{type: :interrupted, mode: :after_turn, text: text})
+    |> broadcast(%{type: :agent_start})
+    |> broadcast(%{type: :turn_start})
+    |> spawn_llm_call()
+    |> then(&{:noreply, &1})
+  end
+
+  def handle_cast({:interrupt, text, :after_turn}, state) do
+    state = %{state | pending_interrupt: {:after_turn, text}}
+    {:noreply, state}
+  end
+
   @impl true
   def handle_info({ref, {:ok, assistant_msg}}, %{task_ref: ref} = state) do
     Process.demonitor(ref, [:flush])
@@ -214,7 +310,29 @@ defmodule PiEx.Agent do
     inject_steering_and_maybe_continue(state)
   end
 
-  defp handle_tool_calls(tool_calls, state) do
+  defp handle_tool_calls(tool_calls, state) when is_list(tool_calls) do
+    case state.pending_interrupt do
+      {:after_turn, text} ->
+        # Skip tool execution, inject interrupt message, re-enter loop
+        user_msg =
+          Message
+          |> Ash.Changeset.for_create(:create_user, %{content: text})
+          |> Ash.create!()
+
+        state
+        |> Map.put(:pending_interrupt, nil)
+        |> append_message(user_msg)
+        |> broadcast(%{type: :interrupted, mode: :after_turn, text: text})
+        |> broadcast(%{type: :turn_start})
+        |> set_status(:streaming)
+        |> spawn_llm_call()
+
+      nil ->
+        handle_tool_calls_normal(tool_calls, state)
+    end
+  end
+
+  defp handle_tool_calls_normal(tool_calls, state) do
     context = %{cwd: state.session.cwd}
 
     state =
