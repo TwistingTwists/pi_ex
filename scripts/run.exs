@@ -74,8 +74,12 @@ defmodule Runner do
         IO.write("\n🤖 ")
         collect_events(pid)
 
+      {:pi_ex, _sid, %{type: :message_delta, delta: delta}} ->
+        IO.write(delta)
+        collect_events(pid)
+
       {:pi_ex, _sid, %{type: :message_end, message: msg}} when msg.role == :assistant ->
-        IO.puts(msg.content || "")
+        IO.puts("")
 
         if msg.tool_calls != [] do
           for tc <- msg.tool_calls do

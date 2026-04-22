@@ -172,9 +172,13 @@ defmodule PiEx.Agent do
     messages = state.messages
     system_prompt = state.system_prompt
     tools = state.tools
-    opts = [model: state.model, cwd: state.cwd]
+    opts = [model: state.model, cwd: state.cwd, caller: self(), subscribers: state.subscribers, session_id: state.session_id]
 
-    task = Task.async(fn -> stream_fn.(messages, system_prompt, tools, opts) end)
+    task =
+      Task.async(fn ->
+        stream_fn.(messages, system_prompt, tools, opts)
+      end)
+
     %{state | task_ref: task.ref}
   end
 

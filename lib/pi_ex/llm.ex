@@ -2,12 +2,14 @@ defmodule PiEx.LLM do
   @moduledoc "Bridges PiEx's agent loop to ReqLLM for real LLM calls."
 
   alias PiEx.Chat.Message
-  alias PiEx.Turn
 
   @default_model "anthropic:claude-sonnet-4-20250514"
 
   @doc """
   Build a stream_fn compatible with PiEx.Agent.
+
+  The returned function streams token deltas to the calling process as
+  `{:llm_delta, text}` messages, then returns the full assistant message.
 
   Options:
     - `:model` — model spec string (default: #{@default_model})
@@ -23,7 +25,9 @@ defmodule PiEx.LLM do
       end)
 
     fn messages, system_prompt, tools, call_opts ->
-      llm_messages = Turn.to_llm_messages(messages)
+      llm_messages = PiEx.Turn.to_llm_messages(messages)
+      subscribers = Keyword.get(call_opts, :subscribers, MapSet.new())
+      session_id = Keyword.get(call_opts, :session_id)
 
       req_tools =
         Enum.map(tools, fn tool_mod ->
@@ -43,11 +47,35 @@ defmodule PiEx.LLM do
 
       call_model = Keyword.get(call_opts, :model) || model
 
-      case ReqLLM.generate_text(call_model, llm_messages, req_opts) do
-        {:ok, response} ->
-          classified = ReqLLM.Response.classify(response)
-          assistant_msg = build_assistant_message(response, classified)
-          {:ok, assistant_msg}
+      case ReqLLM.stream_text(call_model, llm_messages, req_opts) do
+        {:ok, stream_response} ->
+          # Stream tokens to caller, collect full text
+          full_text =
+            stream_response
+            |> ReqLLM.StreamResponse.tokens()
+            |> Enum.map_join("", fn token ->
+              for pid <- subscribers do
+                send(pid, {:pi_ex, session_id, %{type: :message_delta, delta: token}})
+              end
+
+              token
+            end)
+
+          # Get metadata after stream is consumed
+          usage = ReqLLM.StreamResponse.usage(stream_response)
+
+          # Convert to full response for tool call extraction
+          case ReqLLM.StreamResponse.to_response(stream_response) do
+            {:ok, response} ->
+              classified = ReqLLM.Response.classify(response)
+              assistant_msg = build_assistant_message(full_text, classified, response, usage)
+              {:ok, assistant_msg}
+
+            {:error, _} ->
+              # Fallback: build message from streamed text (no tool calls)
+              assistant_msg = build_simple_message(full_text, call_model, usage)
+              {:ok, assistant_msg}
+          end
 
         {:error, reason} ->
           {:error, inspect(reason)}
@@ -55,7 +83,7 @@ defmodule PiEx.LLM do
     end
   end
 
-  defp build_assistant_message(response, classified) do
+  defp build_assistant_message(full_text, classified, response, usage) do
     tool_calls =
       Enum.map(classified.tool_calls, fn tc ->
         %PiEx.Chat.ToolCall{
@@ -71,10 +99,8 @@ defmodule PiEx.LLM do
         :final_answer -> :end_turn
       end
 
-    usage = ReqLLM.Response.usage(response)
-
     attrs = %{
-      content: classified.text || "",
+      content: full_text,
       tool_calls: tool_calls,
       model: response.model,
       provider: "anthropic",
@@ -82,8 +108,19 @@ defmodule PiEx.LLM do
       usage: usage
     }
 
-    Ash.Changeset.for_create(Message, :create_assistant, attrs)
-    |> Ash.create!()
+    Ash.Changeset.for_create(Message, :create_assistant, attrs) |> Ash.create!()
+  end
+
+  defp build_simple_message(text, model, usage) do
+    attrs = %{
+      content: text,
+      model: to_string(model),
+      provider: "anthropic",
+      stop_reason: :end_turn,
+      usage: usage
+    }
+
+    Ash.Changeset.for_create(Message, :create_assistant, attrs) |> Ash.create!()
   end
 
   defp parse_arguments(args) when is_binary(args) do
