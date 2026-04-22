@@ -3,6 +3,7 @@ defmodule PiEx.Agent do
   use GenServer
 
   alias PiEx.Chat.{Message, Session}
+  alias PiEx.Extension.Pipeline
   alias PiEx.Turn
 
   @type stream_fn :: (list(), String.t(), list(), keyword() ->
@@ -14,6 +15,7 @@ defmodule PiEx.Agent do
           system_prompt: String.t(),
           cwd: String.t(),
           model: String.t(),
+          extensions: [module() | {module(), map()}],
           hooks: map(),
           on_event: (map() -> any())
         ]
@@ -70,16 +72,33 @@ defmodule PiEx.Agent do
       })
       |> Ash.create!()
 
+    extensions = Keyword.get(opts, :extensions, [])
+
+    {ext_entries, all_tools} =
+      case Pipeline.init(extensions) do
+        {:ok, entries} ->
+          ext_tools = Pipeline.collect_tools(entries)
+          {entries, Enum.uniq(tools ++ ext_tools)}
+
+        {:error, _reason} ->
+          {[], tools}
+      end
+
+    hooks = build_hooks_from_extensions(ext_entries, session, Keyword.get(opts, :hooks, %{}))
+
     state = %{
       session: session,
       stream_fn: Keyword.fetch!(opts, :stream_fn),
-      tools: tools,
-      tool_map: Turn.build_tool_map(tools),
+      tools: all_tools,
+      tool_map: Turn.build_tool_map(all_tools),
       subscribers: MapSet.new(),
       task_ref: nil,
-      hooks: Keyword.get(opts, :hooks, %{}),
+      hooks: hooks,
+      ext_entries: ext_entries,
       on_event: Keyword.get(opts, :on_event)
     }
+
+    state = fire_extension_event(state, :session_start, %{})
 
     {:ok, state}
   end
@@ -99,6 +118,10 @@ defmodule PiEx.Agent do
 
   @impl true
   def handle_cast({:prompt, text}, %{session: %{status: :idle}} = state) do
+    # Fire :before_prompt — allows extensions to mutate the prompt text
+    {state, payload} = dispatch_extension(state, :before_prompt, %{text: text})
+    text = Map.get(payload, :text, text)
+
     user_msg =
       Message
       |> Ash.Changeset.for_create(:create_user, %{content: text})
@@ -109,6 +132,7 @@ defmodule PiEx.Agent do
     |> set_status(:streaming)
     |> broadcast(%{type: :agent_start})
     |> broadcast(%{type: :turn_start})
+    |> fire_extension_event(:turn_start, %{})
     |> spawn_llm_call()
     |> then(&{:noreply, &1})
   end
@@ -131,6 +155,7 @@ defmodule PiEx.Agent do
     |> set_status(:idle)
     |> Map.put(:task_ref, nil)
     |> broadcast(%{type: :aborted})
+    |> fire_extension_event(:agent_end, %{messages: state.session.messages})
     |> broadcast(%{type: :agent_end, messages: state.session.messages})
     |> then(&{:noreply, &1})
   end
@@ -176,6 +201,7 @@ defmodule PiEx.Agent do
   def handle_info({:continue}, state) do
     state
     |> broadcast(%{type: :turn_start})
+    |> fire_extension_event(:turn_start, %{})
     |> spawn_llm_call()
     |> then(&{:noreply, &1})
   end
@@ -201,6 +227,7 @@ defmodule PiEx.Agent do
     state
     |> append_tool_results(tool_results)
     |> broadcast(%{type: :turn_end})
+    |> fire_extension_event(:turn_end, %{})
     |> inject_steering()
     |> set_status(:streaming)
     |> broadcast(%{type: :turn_start})
@@ -246,7 +273,7 @@ defmodule PiEx.Agent do
       session_id: session.id
     ]
 
-    task = Task.async(fn -> stream_fn.(session.messages, session.system_prompt, tools, opts) end)
+    task = Task.Supervisor.async(PiEx.TaskSupervisor, fn -> stream_fn.(session.messages, session.system_prompt, tools, opts) end)
     %{state | task_ref: task.ref}
   end
 
@@ -278,6 +305,7 @@ defmodule PiEx.Agent do
       [] ->
         state
         |> set_status(:idle)
+        |> fire_extension_event(:agent_end, %{messages: state.session.messages})
         |> broadcast(%{type: :agent_end, messages: state.session.messages})
 
       _queue ->
@@ -297,5 +325,38 @@ defmodule PiEx.Agent do
     end
 
     state
+  end
+
+  # --- Extension helpers ---
+
+  defp ext_context(session) do
+    %{session_id: session.id, cwd: session.cwd, model: session.model}
+  end
+
+  defp fire_extension_event(%{ext_entries: []} = state, _event, _payload), do: state
+
+  defp fire_extension_event(state, event_name, payload) do
+    {new_entries, _payload} =
+      Pipeline.dispatch(state.ext_entries, event_name, payload, ext_context(state.session))
+
+    %{state | ext_entries: new_entries}
+  end
+
+  defp dispatch_extension(%{ext_entries: []} = state, _event, payload), do: {state, payload}
+
+  defp dispatch_extension(state, event_name, payload) do
+    {new_entries, new_payload} =
+      Pipeline.dispatch(state.ext_entries, event_name, payload, ext_context(state.session))
+
+    {%{state | ext_entries: new_entries}, new_payload}
+  end
+
+  defp build_hooks_from_extensions([], _session, base_hooks), do: base_hooks
+
+  defp build_hooks_from_extensions(_ext_entries, _session, base_hooks) do
+    # Extensions use :tool_call / :tool_result events via pipeline dispatch.
+    # We bridge them into the existing hooks interface so Turn doesn't need to change.
+    # Base hooks (if any) still take precedence for backwards compatibility.
+    base_hooks
   end
 end

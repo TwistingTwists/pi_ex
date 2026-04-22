@@ -60,8 +60,8 @@ defmodule PiEx.Turn do
   Execute tool calls in parallel and return tool result messages.
   """
   def execute_tools(tool_calls, tool_map, context, hooks \\ %{}) do
-    tool_calls
-    |> Task.async_stream(
+    PiEx.TaskSupervisor
+    |> Task.Supervisor.async_stream_nolink(tool_calls,
       fn tc -> execute_single_tool(tc, tool_map, context, hooks) end,
       max_concurrency: 4,
       ordered: true
