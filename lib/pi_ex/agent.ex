@@ -398,7 +398,11 @@ defmodule PiEx.Agent do
       session_id: session.id
     ]
 
-    task = Task.Supervisor.async(PiEx.TaskSupervisor, fn -> stream_fn.(session.messages, session.system_prompt, tools, opts) end)
+    task =
+      Task.Supervisor.async(PiEx.TaskSupervisor, fn ->
+        stream_fn.(session.messages, session.system_prompt, tools, opts)
+      end)
+
     %{state | task_ref: task.ref}
   end
 

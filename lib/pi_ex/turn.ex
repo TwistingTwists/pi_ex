@@ -61,7 +61,8 @@ defmodule PiEx.Turn do
   """
   def execute_tools(tool_calls, tool_map, context, hooks \\ %{}) do
     PiEx.TaskSupervisor
-    |> Task.Supervisor.async_stream_nolink(tool_calls,
+    |> Task.Supervisor.async_stream_nolink(
+      tool_calls,
       fn tc -> execute_single_tool(tc, tool_map, context, hooks) end,
       max_concurrency: 4,
       ordered: true

@@ -93,6 +93,7 @@ defmodule PiEx.ExtensionTest do
 
     test "accepts {module, config} tuples" do
       pid = self()
+
       assert {:ok, [{LogExtension, %{log_pid: ^pid, events: []}}]} =
                Pipeline.init([{LogExtension, %{log_pid: self()}}])
     end

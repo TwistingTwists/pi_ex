@@ -6,14 +6,17 @@ defmodule PiEx.InterruptTest do
   # Stream fn that blocks until a message is sent to a named process
   defp blocking_stream_fn(gate) do
     test_pid = self()
+
     fn _messages, _system_prompt, _tools, _opts ->
       send(test_pid, :stream_started)
       # Wait for gate signal via ETS
       wait_for_gate(gate)
+
       msg =
         Message
         |> Ash.Changeset.for_create(:create_assistant, %{content: "done", stop_reason: :end_turn})
         |> Ash.create!()
+
       {:ok, msg}
     end
   end
@@ -30,6 +33,7 @@ defmodule PiEx.InterruptTest do
 
       if count == 0 do
         wait_for_gate(gate)
+
         msg =
           Message
           |> Ash.Changeset.for_create(:create_assistant, %{
@@ -38,9 +42,12 @@ defmodule PiEx.InterruptTest do
             stop_reason: :tool_use
           })
           |> Ash.create!()
+
         {:ok, msg}
       else
-        has_interrupt = Enum.any?(messages, fn m -> m.role == :user and m.content =~ "INTERRUPT" end)
+        has_interrupt =
+          Enum.any?(messages, fn m -> m.role == :user and m.content =~ "INTERRUPT" end)
+
         msg =
           Message
           |> Ash.Changeset.for_create(:create_assistant, %{
@@ -48,6 +55,7 @@ defmodule PiEx.InterruptTest do
             stop_reason: :end_turn
           })
           |> Ash.create!()
+
         {:ok, msg}
       end
     end
@@ -71,12 +79,21 @@ defmodule PiEx.InterruptTest do
   end
 
   test "graceful while idle starts the loop" do
-    {:ok, pid} = PiEx.Agent.start_session(
-      stream_fn: fn _msgs, _sp, _tools, _opts ->
-        msg = Message |> Ash.Changeset.for_create(:create_assistant, %{content: "Hi!", stop_reason: :end_turn}) |> Ash.create!()
-        {:ok, msg}
-      end
-    )
+    {:ok, pid} =
+      PiEx.Agent.start_session(
+        stream_fn: fn _msgs, _sp, _tools, _opts ->
+          msg =
+            Message
+            |> Ash.Changeset.for_create(:create_assistant, %{
+              content: "Hi!",
+              stop_reason: :end_turn
+            })
+            |> Ash.create!()
+
+          {:ok, msg}
+        end
+      )
+
     PiEx.Agent.subscribe(pid)
     PiEx.Agent.interrupt(pid, "Hello", mode: :graceful)
 
@@ -129,6 +146,7 @@ defmodule PiEx.InterruptTest do
         Message
         |> Ash.Changeset.for_create(:create_assistant, %{content: "done", stop_reason: :end_turn})
         |> Ash.create!()
+
       {:ok, msg}
     end
 
@@ -153,12 +171,21 @@ defmodule PiEx.InterruptTest do
   end
 
   test "immediate while idle starts the loop" do
-    {:ok, pid} = PiEx.Agent.start_session(
-      stream_fn: fn _msgs, _sp, _tools, _opts ->
-        msg = Message |> Ash.Changeset.for_create(:create_assistant, %{content: "Ok", stop_reason: :end_turn}) |> Ash.create!()
-        {:ok, msg}
-      end
-    )
+    {:ok, pid} =
+      PiEx.Agent.start_session(
+        stream_fn: fn _msgs, _sp, _tools, _opts ->
+          msg =
+            Message
+            |> Ash.Changeset.for_create(:create_assistant, %{
+              content: "Ok",
+              stop_reason: :end_turn
+            })
+            |> Ash.create!()
+
+          {:ok, msg}
+        end
+      )
+
     PiEx.Agent.subscribe(pid)
     PiEx.Agent.interrupt(pid, "Go", mode: :immediate)
 
@@ -181,7 +208,9 @@ defmodule PiEx.InterruptTest do
     open_gate(gate)
 
     # Should see interrupted event
-    assert_receive {:pi_ex, _, %{type: :interrupted, mode: :after_turn, text: "INTERRUPT: redirect"}}, 5000
+    assert_receive {:pi_ex, _,
+                    %{type: :interrupted, mode: :after_turn, text: "INTERRUPT: redirect"}},
+                   5000
 
     # The agent should re-enter loop (second stream call) without executing tools
     assert_receive {:stream_call, 1}, 5000
@@ -193,6 +222,8 @@ defmodule PiEx.InterruptTest do
     # Should NOT have tool role messages (tools were skipped)
     refute Enum.any?(state.messages, fn m -> m.role == :tool end)
     # Should have the interrupt message
-    assert Enum.any?(state.messages, fn m -> m.role == :user and m.content =~ "INTERRUPT: redirect" end)
+    assert Enum.any?(state.messages, fn m ->
+             m.role == :user and m.content =~ "INTERRUPT: redirect"
+           end)
   end
 end
