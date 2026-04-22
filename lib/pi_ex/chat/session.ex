@@ -16,6 +16,8 @@ defmodule PiEx.Chat.Session do
     attribute :cwd, :string, public?: true
     attribute :model, :string, public?: true
     attribute :messages, {:array, PiEx.Chat.Message}, default: [], public?: true
+    attribute :entries, {:array, PiEx.Chat.SessionEntry}, default: [], public?: true
+    attribute :leaf_id, :string, public?: true
     attribute :steering_queue, {:array, :string}, default: [], public?: true
     attribute :created_at, :utc_datetime_usec, default: &DateTime.utc_now/0, public?: true
   end

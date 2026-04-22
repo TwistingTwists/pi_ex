@@ -44,6 +44,9 @@ defmodule PiEx.Agent do
   @spec get_state(pid()) :: %{status: atom(), messages: list(), model: String.t() | nil}
   def get_state(pid), do: GenServer.call(pid, :get_state)
 
+  @spec get_session(pid()) :: Session.t()
+  def get_session(pid), do: GenServer.call(pid, :get_session)
+
   # --- Callbacks ---
 
   @impl true
@@ -88,6 +91,10 @@ defmodule PiEx.Agent do
 
   def handle_call(:get_state, _from, %{session: session} = state) do
     {:reply, %{status: session.status, messages: session.messages, model: session.model}, state}
+  end
+
+  def handle_call(:get_session, _from, state) do
+    {:reply, state.session, state}
   end
 
   @impl true
@@ -220,7 +227,7 @@ defmodule PiEx.Agent do
   end
 
   defp append_message(state, msg) do
-    session = %{state.session | messages: state.session.messages ++ [msg]}
+    session = PiEx.Session.append_message(state.session, msg)
     %{state | session: session}
   end
 

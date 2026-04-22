@@ -19,6 +19,9 @@ defmodule PiEx do
   @doc "Get the current session state."
   defdelegate get_state(pid), to: PiEx.Agent
 
+  @doc "Get the full session struct."
+  defdelegate get_session(pid), to: PiEx.Agent
+
   @doc """
   Hello world.
 
