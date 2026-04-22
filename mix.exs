@@ -37,7 +37,7 @@ defmodule PiEx.MixProject do
 
   defp package do
     [
-      name: "pi_ex",
+      name: "pi_ex_native",
       licenses: ["MIT"],
       links: %{"GitHub" => "https://github.com/TwistingTwists/pi_ex"},
       files: ~w(lib .formatter.exs mix.exs README.md LICENSE)
