@@ -25,7 +25,6 @@ defmodule PiEx.LLM do
 
     fn messages, system_prompt, tools, call_opts ->
       llm_messages = PiEx.Turn.to_llm_messages(messages)
-      subscribers = Keyword.get(call_opts, :subscribers, MapSet.new())
       session_id = Keyword.get(call_opts, :session_id)
 
       req_tools =
@@ -56,8 +55,8 @@ defmodule PiEx.LLM do
             Enum.reduce(stream_response.stream, init, fn chunk, acc ->
               case chunk.type do
                 :content when is_binary(chunk.text) and chunk.text != "" ->
-                  for pid <- subscribers do
-                    send(pid, {:pi_ex, session_id, %{type: :message_delta, delta: chunk.text}})
+                  if session_id do
+                    PiEx.Events.broadcast(session_id, %{type: :message_delta, delta: chunk.text})
                   end
 
                   %{acc | texts: [chunk.text | acc.texts]}

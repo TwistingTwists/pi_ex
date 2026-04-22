@@ -3,6 +3,7 @@ defmodule PiEx.Agent do
   use GenServer
 
   alias PiEx.Chat.{Message, Session}
+  alias PiEx.Events
   alias PiEx.Extension.Pipeline
   alias PiEx.Turn
 
@@ -33,6 +34,9 @@ defmodule PiEx.Agent do
 
   @spec subscribe(pid()) :: :ok
   def subscribe(pid), do: GenServer.call(pid, :subscribe)
+
+  @spec session_id(pid()) :: String.t()
+  def session_id(pid), do: GenServer.call(pid, :session_id)
 
   @spec prompt(pid(), String.t()) :: :ok
   def prompt(pid, text), do: GenServer.cast(pid, {:prompt, text})
@@ -97,7 +101,6 @@ defmodule PiEx.Agent do
       stream_fn: Keyword.fetch!(opts, :stream_fn),
       tools: all_tools,
       tool_map: Turn.build_tool_map(all_tools),
-      subscribers: MapSet.new(),
       task_ref: nil,
       hooks: hooks,
       ext_entries: ext_entries,
@@ -111,8 +114,13 @@ defmodule PiEx.Agent do
   end
 
   @impl true
-  def handle_call(:subscribe, {pid, _}, state) do
-    {:reply, :ok, %{state | subscribers: MapSet.put(state.subscribers, pid)}}
+  def handle_call(:subscribe, {caller, _}, state) do
+    Events.subscribe(state.session.id, caller)
+    {:reply, :ok, state}
+  end
+
+  def handle_call(:session_id, _from, state) do
+    {:reply, state.session.id, state}
   end
 
   def handle_call(:get_state, _from, %{session: session} = state) do
@@ -381,13 +389,12 @@ defmodule PiEx.Agent do
   end
 
   defp spawn_llm_call(state) do
-    %{session: session, stream_fn: stream_fn, tools: tools, subscribers: subscribers} = state
+    %{session: session, stream_fn: stream_fn, tools: tools} = state
 
     opts = [
       model: session.model,
       cwd: session.cwd,
       caller: self(),
-      subscribers: subscribers,
       session_id: session.id
     ]
 
@@ -436,12 +443,7 @@ defmodule PiEx.Agent do
   end
 
   defp broadcast(state, event) do
-    if state.on_event, do: state.on_event.(event)
-
-    for pid <- state.subscribers do
-      send(pid, {:pi_ex, state.session.id, event})
-    end
-
+    Events.broadcast(state.session.id, event, state.on_event)
     state
   end
 

@@ -8,6 +8,7 @@ defmodule PiEx.Application do
   @impl true
   def start(_type, _args) do
     children = [
+      {Registry, keys: :duplicate, name: PiEx.EventRegistry},
       {Task.Supervisor, name: PiEx.TaskSupervisor},
       {DynamicSupervisor, name: :pi_ex_sessions, strategy: :one_for_one}
     ]
