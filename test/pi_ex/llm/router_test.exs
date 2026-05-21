@@ -8,6 +8,111 @@ defmodule PiEx.LLM.RouterTest do
     assert [%{backend: :req_llm, model: "openai:gpt-4.1", api_key: "key"}] = config.routes
   end
 
+  test "normalizes native ShannonEx routes" do
+    config =
+      PiEx.LLM.Router.normalize_config!(
+        routes: [[name: :native_shannon, backend: :shannon_ex, model: "shannon:claude"]]
+      )
+
+    assert [%{backend: :shannon_ex, model: "shannon:claude"}] = config.routes
+  end
+
+  @tag :tmp_dir
+  test "streams from a native ShannonEx route", %{tmp_dir: tmp_dir} do
+    runner = fn prompt, opts ->
+      send(self(), {:shannon_prompt, prompt})
+      send(self(), {:shannon_opts, opts})
+
+      {:ok,
+       [
+         %{
+           "type" => "assistant",
+           "message" => %{
+             "role" => "assistant",
+             "content" => [%{"type" => "text", "text" => "native hello"}]
+           }
+         },
+         %{
+           "type" => "result",
+           "subtype" => "success",
+           "result" => "native hello",
+           "usage" => %{"input_tokens" => 3, "output_tokens" => 2},
+           "stop_reason" => "end_turn"
+         }
+       ]}
+    end
+
+    user_message =
+      PiEx.Chat.Message
+      |> Ash.Changeset.for_create(:create_user, %{content: "Reply natively"})
+      |> Ash.create!()
+
+    stream_fn =
+      PiEx.LLM.Router.stream_fn(
+        routes: [
+          [
+            name: :native_shannon,
+            backend: :shannon_ex,
+            model: "shannon:claude-code",
+            cwd: tmp_dir,
+            options: [runner: runner, claude_args: ["--model", "claude-sonnet-4"]]
+          ]
+        ]
+      )
+
+    assert {:ok, msg} = stream_fn.([user_message], "system prompt", [], cwd: tmp_dir)
+    assert msg.content == "native hello"
+    assert msg.provider == "shannon_ex"
+    assert msg.model == "shannon:claude-code"
+    assert msg.usage == %{"input_tokens" => 3, "output_tokens" => 2}
+    assert msg.stop_reason == :end_turn
+
+    assert_received {:shannon_prompt, prompt}
+    assert prompt =~ "system prompt"
+    assert prompt =~ "User: Reply natively"
+
+    assert_received {:shannon_opts, opts}
+    assert Keyword.fetch!(opts, :cwd) == tmp_dir
+    assert Keyword.fetch!(opts, :runner) == runner
+    assert Keyword.fetch!(opts, :claude_args) == ["--model", "claude-sonnet-4"]
+  end
+
+  @tag :tmp_dir
+  @tag :shannon_ex
+  @tag :integration
+  @tag timeout: 240_000
+  test "routes through the real native ShannonEx runner", %{tmp_dir: _tmp_dir} do
+    unless run_shannon_ex_tests?() do
+      IO.puts("Skipping native ShannonEx router test. Set RUN_SHANNON_EX_TESTS=1 to run it.")
+    else
+      shannon_cwd = "/tmp/shannon-piex-native"
+      File.mkdir_p!(shannon_cwd)
+
+      user_message =
+        PiEx.Chat.Message
+        |> Ash.Changeset.for_create(:create_user, %{content: "Reply with exactly: hello"})
+        |> Ash.create!()
+
+      stream_fn =
+        PiEx.LLM.Router.stream_fn(
+          routes: [
+            [
+              name: :native_shannon,
+              backend: :shannon_ex,
+              model: "shannon_ex:claude-code",
+              cwd: shannon_cwd,
+              options: [turn_timeout_ms: 220_000]
+            ]
+          ]
+        )
+
+      assert {:ok, msg} = stream_fn.([user_message], "", [], cwd: shannon_cwd)
+      assert String.trim(msg.content) == "hello"
+      assert msg.provider == "shannon_ex"
+      assert msg.model == "shannon_ex:claude-code"
+    end
+  end
+
   @tag :tmp_dir
   test "streams from a CLI JSONL route", %{tmp_dir: tmp_dir} do
     script = Path.join(tmp_dir, "llm.sh")
@@ -89,5 +194,11 @@ defmodule PiEx.LLM.RouterTest do
     assert {:ok, msg} = stream_fn.([], "system", [], cwd: tmp_dir)
     assert msg.stop_reason == :tool_use
     assert [%{id: "call_1", name: "read", arguments: %{"path" => "mix.exs"}}] = msg.tool_calls
+  end
+
+  defp run_shannon_ex_tests? do
+    System.get_env("RUN_SHANNON_EX_TESTS") == "1" &&
+      System.find_executable("claude") != nil &&
+      System.find_executable("tmux") != nil
   end
 end

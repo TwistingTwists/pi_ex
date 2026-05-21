@@ -59,6 +59,7 @@ defmodule PiEx.MixProject do
     [
       {:usage_rules, "~> 1.0", only: [:dev]},
       {:ash, "~> 3.24"},
+      {:shannon_ex, path: "../shannon_ex"},
       {:req_llm, "~> 1.10"},
       {:jason, "~> 1.4"},
       {:ex_doc, "~> 0.35", only: :dev, runtime: false}

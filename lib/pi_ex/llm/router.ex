@@ -68,6 +68,8 @@ defmodule PiEx.LLM.Router do
       `google:*` plus per-route keys/options.
     * CLI JSONL backends: `backend: :jsonl_cli` spawns a configured command and
       consumes newline-delimited JSON events.
+    * Native ShannonEx backend: `backend: :shannon_ex` calls the `ShannonEx`
+      library directly while preserving the Shannon event parser contract.
     * Streaming UI deltas: content chunks are broadcast as `:message_delta`;
       thinking chunks as `:thinking_delta`; raw chunks can be emitted with
       `emit_chunks?: true`.
@@ -115,7 +117,7 @@ defmodule PiEx.LLM.Router do
   @default_model "anthropic:claude-sonnet-4-20250514"
   @default_cli_timeout 300_000
 
-  @type backend :: :req_llm | :jsonl_cli | :cli
+  @type backend :: :req_llm | :jsonl_cli | :cli | :shannon_ex
   @type strategy :: :fallback | :first_available | :round_robin | :weighted_random
   @type secret ::
           String.t()
@@ -158,6 +160,7 @@ defmodule PiEx.LLM.Router do
       "OpenAI-compatible inline model support",
       "Anthropic/Google/OpenAI provider support through ReqLLM",
       "Extensible CLI parser backend with default JSONL and Shannon parsers",
+      "Native ShannonEx route backend",
       "PiEx event streaming callbacks",
       "Tool-call normalization",
       "Route/account load balancing",
@@ -173,6 +176,7 @@ defmodule PiEx.LLM.Router do
       %{phase: 1, status: :implemented, item: "provider/model abstraction via ReqLLM routes"},
       %{phase: 1, status: :implemented, item: "streaming deltas and tool call collection"},
       %{phase: 1, status: :implemented, item: "CLI JSONL route for non-HTTP models"},
+      %{phase: 1, status: :implemented, item: "native ShannonEx route backend"},
       %{
         phase: 1,
         status: :implemented,
@@ -269,6 +273,21 @@ defmodule PiEx.LLM.Router do
     :exit, reason -> {:error, {:exit, reason}}
   end
 
+  defp call_route(
+         %{backend: :shannon_ex} = route,
+         config,
+         messages,
+         system_prompt,
+         tools,
+         call_opts
+       ) do
+    call_shannon_ex(route, config, messages, system_prompt, tools, call_opts)
+  rescue
+    error -> {:error, Exception.message(error)}
+  catch
+    :exit, reason -> {:error, {:exit, reason}}
+  end
+
   defp call_req_llm(route, config, messages, system_prompt, tools, call_opts) do
     session_id = Keyword.get(call_opts, :session_id)
     llm_messages = PiEx.Turn.to_llm_messages(messages)
@@ -318,7 +337,7 @@ defmodule PiEx.LLM.Router do
          true <- maybe_write_cli_request(port, route, request) do
       cli_loop(
         port,
-        cli_state(model, parser_module, parser_state, route),
+        cli_state(model, parser_module, parser_state, route, "cli"),
         config,
         session_id,
         timeout
@@ -329,9 +348,45 @@ defmodule PiEx.LLM.Router do
     end
   end
 
+  defp call_shannon_ex(route, config, messages, system_prompt, _tools, call_opts) do
+    session_id = Keyword.get(call_opts, :session_id)
+    model = route_model(route, call_opts)
+    cwd = Keyword.get(call_opts, :cwd) || Map.get(route, :cwd)
+
+    prompt = shannon_prompt(messages, system_prompt)
+
+    opts =
+      route
+      |> Map.get(:options, [])
+      |> provider_options_to_keyword()
+      |> maybe_put(:cwd, cwd)
+
+    with {:ok, parser_module, parser_state} <- init_shannon_ex_parser(route),
+         {:ok, shannon_messages} <- ShannonEx.run(prompt, opts) do
+      consume_shannon_ex_messages(
+        shannon_messages,
+        cli_state(model, parser_module, parser_state, route, "shannon_ex"),
+        config,
+        session_id
+      )
+    else
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
   defp init_cli_parser(route) do
     {parser_module, parser_opts} = PiEx.LLM.CLI.Parser.normalize(Map.get(route, :parser))
+    init_parser(parser_module, parser_opts)
+  end
 
+  defp init_shannon_ex_parser(route) do
+    {parser_module, parser_opts} =
+      PiEx.LLM.CLI.Parser.normalize(Map.get(route, :parser, PiEx.LLM.CLI.Parsers.Shannon))
+
+    init_parser(parser_module, parser_opts)
+  end
+
+  defp init_parser(parser_module, parser_opts) do
     case parser_module.init(parser_opts) do
       {:ok, parser_state} ->
         {:ok, parser_module, parser_state}
@@ -469,7 +524,28 @@ defmodule PiEx.LLM.Router do
     {:cont, state}
   end
 
-  defp cli_state(model, parser_module, parser_state, route) do
+  defp consume_shannon_ex_messages(messages, state, config, session_id) when is_list(messages) do
+    Enum.reduce_while(messages, {:cont, state}, fn message, {:cont, state} ->
+      line = Jason.encode!(message)
+
+      case handle_cli_line(line, state, config, session_id) do
+        {:cont, state} -> {:cont, {:cont, state}}
+        {:done, state} -> {:halt, {:done, state}}
+        {:error, reason} -> {:halt, {:error, reason}}
+      end
+    end)
+    |> case do
+      {:cont, state} -> {:ok, build_assistant_message_from_cli(state)}
+      {:done, state} -> {:ok, build_assistant_message_from_cli(state)}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp consume_shannon_ex_messages(other, _state, _config, _session_id) do
+    {:error, "ShannonEx.run/2 returned non-list messages: #{inspect(other)}"}
+  end
+
+  defp cli_state(model, parser_module, parser_state, route, provider) do
     %{
       texts: [],
       tool_calls: [],
@@ -479,8 +555,45 @@ defmodule PiEx.LLM.Router do
       model: model,
       parser_module: parser_module,
       parser_state: parser_state,
-      route: route
+      route: route,
+      provider: provider
     }
+  end
+
+  defp shannon_prompt(messages, system_prompt) do
+    [system_prompt_section(system_prompt), conversation_prompt(messages)]
+    |> Enum.reject(&(&1 in [nil, ""]))
+    |> Enum.join("\n\n")
+  end
+
+  defp system_prompt_section(nil), do: nil
+  defp system_prompt_section(""), do: nil
+  defp system_prompt_section(system_prompt), do: "System:\n" <> system_prompt
+
+  defp conversation_prompt([]), do: nil
+
+  defp conversation_prompt(messages) do
+    "Conversation:\n" <> Enum.map_join(messages, "\n\n", &message_prompt/1)
+  end
+
+  defp message_prompt(%Message{role: :user, content: content}), do: "User: " <> (content || "")
+
+  defp message_prompt(%Message{role: :assistant, content: content, tool_calls: tool_calls})
+       when is_list(tool_calls) and tool_calls != [] do
+    rendered_calls =
+      tool_calls
+      |> Enum.map_join("\n", fn tool_call ->
+        "Tool call #{tool_call.name}: " <> Jason.encode!(tool_call.arguments || %{})
+      end)
+
+    "Assistant: " <> (content || "") <> "\n" <> rendered_calls
+  end
+
+  defp message_prompt(%Message{role: :assistant, content: content}),
+    do: "Assistant: " <> (content || "")
+
+  defp message_prompt(%Message{role: :tool_result, tool_name: tool_name, content: content}) do
+    "Tool result #{tool_name}: " <> (content || "")
   end
 
   defp apply_cli_tool_delta(state, event) do
@@ -588,7 +701,7 @@ defmodule PiEx.LLM.Router do
   end
 
   defp validate_route!(%{backend: backend} = route)
-       when backend in [:req_llm, :jsonl_cli, :cli] do
+       when backend in [:req_llm, :jsonl_cli, :cli, :shannon_ex] do
     route
   end
 
@@ -756,7 +869,7 @@ defmodule PiEx.LLM.Router do
       content: text,
       tool_calls: tool_calls,
       model: model_to_string(state.model),
-      provider: "cli",
+      provider: state.provider,
       stop_reason: stop_reason(tool_calls, finish_reason),
       usage: state.usage
     }
