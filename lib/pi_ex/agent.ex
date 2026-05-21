@@ -16,6 +16,7 @@ defmodule PiEx.Agent do
           system_prompt: String.t(),
           cwd: String.t(),
           model: String.t(),
+          llm: keyword() | map(),
           extensions: [module() | {module(), map()}],
           hooks: map(),
           on_event: (map() -> any())
@@ -98,7 +99,7 @@ defmodule PiEx.Agent do
 
     state = %{
       session: session,
-      stream_fn: Keyword.fetch!(opts, :stream_fn),
+      stream_fn: build_stream_fn(opts, model),
       tools: all_tools,
       tool_map: Turn.build_tool_map(all_tools),
       task_ref: nil,
@@ -313,6 +314,18 @@ defmodule PiEx.Agent do
   def handle_info({:DOWN, _ref, :process, _pid, _reason}, state), do: {:noreply, state}
 
   # --- Private helpers ---
+
+  defp build_stream_fn(opts, model) do
+    Keyword.get_lazy(opts, :stream_fn, fn ->
+      llm_opts = Keyword.get(opts, :llm, [])
+
+      case llm_opts do
+        [] -> PiEx.LLM.stream_fn(model: model)
+        %{} -> PiEx.LLM.stream_fn(llm_opts)
+        opts when is_list(opts) -> PiEx.LLM.stream_fn(opts)
+      end
+    end)
+  end
 
   defp handle_tool_calls([], state) do
     inject_steering_and_maybe_continue(state)

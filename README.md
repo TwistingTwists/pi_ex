@@ -5,6 +5,7 @@ extension pipeline, interrupt API, and session persistence.
 
 ## Features
 
+- **Provider-agnostic LLM runtime** — ReqLLM-backed routing for OpenAI, Anthropic, Google, OpenAI-compatible endpoints, and JSONL CLI backends
 - **Agent loop** — GenServer-based agent that manages LLM ↔ tool execution cycles
 - **Tool system** — Built-in `read`, `write`, `edit`, `bash` tools; define custom tools with `PiEx.Tool`
 - **Extensions** — Hook into the agent lifecycle (`before_prompt`, `after_turn`, etc.) via `PiEx.Extension`
@@ -28,7 +29,7 @@ end
 
 ```elixir
 # Start an agent session
-{:ok, pid} = PiEx.start_session(model: "anthropic/claude-sonnet-4-20250514", cwd: ".")
+{:ok, pid} = PiEx.start_session(model: "anthropic:claude-sonnet-4-20250514", cwd: ".")
 
 # Subscribe to events
 PiEx.subscribe(pid)
@@ -71,6 +72,39 @@ defmodule MyApp.AgentSession do
     {:noreply, %{state | events: [event | state.events]}}
   end
 end
+```
+
+## LLM routing
+
+Use `PiEx.LLM.Router` when you need multiple providers, accounts, or CLI backends:
+
+```elixir
+stream_fn =
+  PiEx.LLM.Router.stream_fn(
+    strategy: :weighted_random,
+    routes: [
+      [name: :openai_a, model: "openai:gpt-4.1", api_key: {:env, "OPENAI_KEY_A"}],
+      [name: :anthropic, model: "anthropic:claude-sonnet-4-5-20250929", api_key: {:env, "ANTHROPIC_API_KEY"}],
+      [name: :google, model: "google:gemini-2.5-pro", api_key: {:env, "GOOGLE_API_KEY"}],
+      [name: :cli, backend: :jsonl_cli, command: ["my-llm", "--jsonl"]]
+    ]
+  )
+
+{:ok, pid} = PiEx.start_session(stream_fn: stream_fn, cwd: ".")
+```
+
+You can also pass router config directly:
+
+```elixir
+{:ok, pid} = PiEx.start_session(
+  llm: [
+    strategy: :round_robin,
+    routes: [
+      [name: :acct_a, model: "openai:gpt-4.1", api_key: {:env, "OPENAI_KEY_A"}],
+      [name: :acct_b, model: "openai:gpt-4.1", api_key: {:env, "OPENAI_KEY_B"}]
+    ]
+  ]
+)
 ```
 
 ## Extensions
