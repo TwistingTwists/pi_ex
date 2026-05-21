@@ -59,7 +59,6 @@ defmodule PiEx.MixProject do
     [
       {:usage_rules, "~> 1.0", only: [:dev]},
       {:ash, "~> 3.24"},
-      {:shannon_ex, path: "../shannon_ex"},
       {:req_llm, "~> 1.10"},
       {:jason, "~> 1.4"},
       {:ex_doc, "~> 0.35", only: :dev, runtime: false}
@@ -71,7 +70,21 @@ defmodule PiEx.MixProject do
       name: "pi_ex_native",
       licenses: ["MIT"],
       links: %{"GitHub" => "https://github.com/TwistingTwists/pi_ex"},
-      files: ~w(lib .formatter.exs mix.exs README.md LICENSE)
+      files: ~w(
+          lib
+          examples/orchestrator_demo/.formatter.exs
+          examples/orchestrator_demo/.gitignore
+          examples/orchestrator_demo/README.md
+          examples/orchestrator_demo/lib
+          examples/orchestrator_demo/mix.exs
+          examples/orchestrator_demo/mix.lock
+          examples/orchestrator_demo/priv
+          examples/orchestrator_demo/test
+          .formatter.exs
+          mix.exs
+          README.md
+          LICENSE
+        )
     ]
   end
 

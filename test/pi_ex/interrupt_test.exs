@@ -159,7 +159,9 @@ defmodule PiEx.InterruptTest do
     # Interrupt immediately — should kill first task
     PiEx.Agent.interrupt(pid, "STOP NOW", mode: :immediate)
 
-    assert_receive {:pi_ex_native, _, %{type: :interrupted, mode: :immediate, text: "STOP NOW"}}, 5000
+    assert_receive {:pi_ex_native, _, %{type: :interrupted, mode: :immediate, text: "STOP NOW"}},
+                   5000
+
     assert_receive {:stream_started, 1}, 5000
 
     # Let second call finish

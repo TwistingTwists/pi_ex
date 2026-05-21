@@ -17,6 +17,16 @@ defmodule PiEx.LLM.RouterTest do
     assert [%{backend: :shannon_ex, model: "shannon:claude"}] = config.routes
   end
 
+  test "native ShannonEx route reports missing optional dependency" do
+    stream_fn =
+      PiEx.LLM.Router.stream_fn(
+        routes: [[name: :native_shannon, backend: :shannon_ex, model: "shannon:claude"]]
+      )
+
+    assert {:error, reason} = stream_fn.([], "system", [], [])
+    assert reason =~ "ShannonEx is not available"
+  end
+
   @tag :tmp_dir
   test "streams from a native ShannonEx route", %{tmp_dir: tmp_dir} do
     runner = fn prompt, opts ->

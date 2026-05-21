@@ -68,8 +68,9 @@ defmodule PiEx.LLM.Router do
       `google:*` plus per-route keys/options.
     * CLI JSONL backends: `backend: :jsonl_cli` spawns a configured command and
       consumes newline-delimited JSON events.
-    * Native ShannonEx backend: `backend: :shannon_ex` calls the `ShannonEx`
-      library directly while preserving the Shannon event parser contract.
+    * Native ShannonEx backend: `backend: :shannon_ex` calls the optional
+      `ShannonEx` library directly, or a supplied `options: [runner: fun]`,
+      while preserving the Shannon event parser contract.
     * Streaming UI deltas: content chunks are broadcast as `:message_delta`;
       thinking chunks as `:thinking_delta`; raw chunks can be emitted with
       `emit_chunks?: true`.
@@ -362,7 +363,7 @@ defmodule PiEx.LLM.Router do
       |> maybe_put(:cwd, cwd)
 
     with {:ok, parser_module, parser_state} <- init_shannon_ex_parser(route),
-         {:ok, shannon_messages} <- ShannonEx.run(prompt, opts) do
+         {:ok, shannon_messages} <- run_shannon_ex(prompt, opts) do
       consume_shannon_ex_messages(
         shannon_messages,
         cli_state(model, parser_module, parser_state, route, "shannon_ex"),
@@ -371,6 +372,23 @@ defmodule PiEx.LLM.Router do
       )
     else
       {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp run_shannon_ex(prompt, opts) do
+    case Keyword.fetch(opts, :runner) do
+      {:ok, runner} when is_function(runner, 2) ->
+        runner.(prompt, opts)
+
+      :error ->
+        shannon_ex_module = Module.concat(["ShannonEx"])
+
+        if Code.ensure_loaded?(shannon_ex_module) do
+          apply(shannon_ex_module, :run, [prompt, opts])
+        else
+          {:error,
+           "ShannonEx is not available. Add shannon_ex to your application dependencies or provide options: [runner: fun] for :shannon_ex routes."}
+        end
     end
   end
 

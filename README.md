@@ -46,6 +46,25 @@ after
 end
 ```
 
+## Self-contained orchestration example
+
+See [`examples/orchestrator_demo`](examples/orchestrator_demo) for a small Mix
+project that uses `pi_ex_native` as a dependency, wraps the agent in an
+application-owned GenServer, and can be run from IEx without API keys.
+
+```bash
+cd examples/orchestrator_demo
+mix deps.get
+iex -S mix
+```
+
+```elixir
+{:ok, runner} = OrchestratorDemo.start_demo()
+:ok = OrchestratorDemo.prompt(runner, "Read sample.txt")
+{:ok, response} = OrchestratorDemo.await_done(runner)
+IO.puts(response)
+```
+
 ## Wrapping in a GenServer
 
 In production apps, wrap PiEx in your own GenServer to own the lifecycle and fan out events:
@@ -92,6 +111,10 @@ stream_fn =
 
 {:ok, pid} = PiEx.start_session(stream_fn: stream_fn, cwd: ".")
 ```
+
+Native `backend: :shannon_ex` routes are optional. Add `shannon_ex` to your
+application dependencies, or pass `options: [runner: fun]`, before using that
+backend.
 
 You can also pass router config directly:
 
